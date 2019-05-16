@@ -37,6 +37,16 @@ def read_xyz(file_path):
         mu = QED.qed(Chem.MolFromSmiles(smiles))
     return {'smiles': smiles, 'QED': mu}   
 
+def read_smiles(file_path):
+    with open(file_path, 'r') as f:
+        data = []
+        for line in f:
+            smiles, _ = line.strip().split('\t', 1)
+            mu = QED.qed(Chem.MolFromSmiles(smiles))
+            data.append({'smiles': smiles, 'QED': mu})
+    return data
+
+
 def train_valid_split(unzip_path):
     print('reading data...')
     raw_data = {'train': [], 'valid': []} # save the train, valid dataset.
@@ -85,21 +95,6 @@ def preprocess(raw_data, dataset):
             utils.dump('smiles_%s.pkl' % dataset, all_smiles)         
             
 if __name__ == "__main__":
-    # download   
-    download_path = 'dsgdb9nsd.xyz.tar.bz2'
-    if not os.path.exists(download_path):
-        print('downloading data to %s ...' % download_path)
-        source = 'https://ndownloader.figshare.com/files/3195389'
-        os.system('wget -O %s %s' % (download_path, source))
-        print('finished downloading')
-        
-    # unzip
-    unzip_path = 'qm9_raw'
-    if not os.path.exists(unzip_path):
-        print('extracting data to %s ...' % unzip_path)
-        os.mkdir(unzip_path)
-        os.system('tar xvjf %s -C %s' % (download_path, unzip_path))
-        print('finished extracting')
-      
-    raw_data = train_valid_split(unzip_path)
+    fname = "20181224-1638_{}.smiles"
+    raw_data = {k: read_smiles(fname.format(k)) for k in ("train", "valid")}
     preprocess(raw_data, dataset)
