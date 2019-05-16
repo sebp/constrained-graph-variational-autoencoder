@@ -19,7 +19,6 @@ from collections import defaultdict, deque
 import numpy as np
 import tensorflow as tf
 import sys, traceback
-import pdb
 import json
 import os
 from GGNN_core import ChemModel
@@ -1012,14 +1011,9 @@ class DenseGGNNChemModel(ChemModel):
 if __name__ == "__main__":
     args = docopt(__doc__)
     dataset=args.get('--dataset')
-    try:
-        model = DenseGGNNChemModel(args)
-        evaluation = False
-        if evaluation:
-            model.example_evaluation()
-        else:
-            model.train()
-    except:
-        typ, value, tb = sys.exc_info()
-        traceback.print_exc()
-        pdb.post_mortem(tb)
+    model = DenseGGNNChemModel(args)
+    evaluation = False
+    if evaluation:
+        model.example_evaluation()
+    else:
+        model.train()
