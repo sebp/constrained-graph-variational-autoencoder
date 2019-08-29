@@ -294,7 +294,7 @@ class DenseGGNNChemModel(ChemModel):
     # h: initial representation, adj: adjacency matrix, different GNN parameters for encoder and decoder
         v = self.placeholders['num_vertices']
         if gru_scope_name=="gru_scope_decoder":
-            h_dim = self.params['hidden_size'] + self.params['hidden_size']
+            h_dim = self.params['hidden_size'] + self.params['hidden_size'] + 1
         else:
             h_dim = self.params['hidden_size']
         h = tf.reshape(h, [-1, h_dim])
