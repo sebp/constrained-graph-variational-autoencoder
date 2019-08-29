@@ -11,6 +11,21 @@ import random
 import utils
 from utils import MLP, dataset_info, ThreadedIterator, graph_to_adj_mat, SMALL_NUMBER, LARGE_NUMBER, graph_to_adj_mat
 
+
+def load_save_disk(f, filename):
+    def inner(*args, **kwargs):
+        ff = filename + "-cache.pkl"
+        if os.path.exists(ff):
+            with open(ff, "rb") as fin:
+                results = pickle.load(fin)
+        else:
+            results = f(*args, **kwargs)
+            with open(ff, "wb") as fout:
+                pickle.dump(results, fout)
+        return results
+    return inner
+
+
 class ChemModel(object):
     @classmethod
     def default_params(cls):
@@ -102,11 +117,12 @@ class ChemModel(object):
         num_fwd_edge_types = len(utils.bond_dict) - 1
         for g in data:
             self.max_num_vertices = max(self.max_num_vertices, max([v for e in g['graph'] for v in [e[0], e[2]]]))
-            
+
         self.num_edge_types = max(self.num_edge_types, num_fwd_edge_types * (1 if self.params['tie_fwd_bkwd'] else 2))
         self.annotation_size = max(self.annotation_size, len(data[0]["node_features"][0]))
 
-        return self.process_raw_graphs(data, is_training_data, file_name)
+        data_fn = load_save_disk(self.process_raw_graphs, file_name)
+        return data_fn(data, is_training_data, file_name)
 
     @staticmethod
     def graph_string_to_array(graph_string: str) -> List[List[int]]:
