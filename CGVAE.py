@@ -505,9 +505,9 @@ class DenseGGNNChemModel(ChemModel):
         self.ops['mean_kl_loss'] = tf.reduce_mean(kl_trade_off_lambda *self.ops['kl_loss'])
         total_loss = tf.reduce_mean(self.ops["edge_loss"] + self.ops['node_symbol_loss'] + \
                               kl_trade_off_lambda *self.ops['kl_loss'])
-
-
-
+        for nam in ('mean_edge_loss', 'mean_node_symbol_loss', 'mean_kl_loss'):
+            tf.summary.scalar(nam, self.ops[nam])
+        tf.summary.scalar('loss', total_loss)
         return total_loss
 
     def gated_regression(self, last_h, regression_gate, regression_transform, hidden_size, projection_weight, projection_bias, v, mask):

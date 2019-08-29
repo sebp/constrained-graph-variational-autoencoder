@@ -45,6 +45,7 @@ class ChemModel(object):
         
         self.run_id = "_".join([time.strftime("%Y-%m-%d-%H-%M-%S"), str(os.getpid())])
         log_dir = args.get('--log_dir') or '.'
+        self.checkpoint_dir = os.path.join(log_dir, "checkpoints")
         self.log_file = os.path.join(log_dir, "%s_log_%s.json" % (self.run_id, dataset))
         self.best_model_file = os.path.join(log_dir, "%s_model.pickle" % self.run_id)
 
@@ -73,6 +74,11 @@ class ChemModel(object):
             self.ops = {}
             self.make_model()
             self.make_train_step()
+            self.saver = tf.train.Saver(
+                self.sess.graph.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
+            self.writer = tf.summary.FileWriterCache.get(self.checkpoint_dir)
+            self.writer.add_graph(self.graph)
+            self.summary_op = tf.summary.merge_all()
 
             # Restore/initialize variables:
             restore_file = args.get('--restore')
@@ -161,18 +167,22 @@ class ChemModel(object):
 
         optimizer = tf.train.AdamOptimizer(self.params['learning_rate'])
         grads_and_vars = optimizer.compute_gradients(self.ops['loss'], var_list=trainable_vars)
+
+        tf.summary.scalar("global_norm/gradient_norm",
+            tf.global_norm(list(zip(*grads_and_vars))[0]))
+
         clipped_grads = []
         for grad, var in grads_and_vars:
             if grad is not None:
                 clipped_grads.append((tf.clip_by_norm(grad, self.params['clamp_gradient_norm']), var))
             else:
                 clipped_grads.append((grad, var))
-        grads_for_display=[]
-        for grad, var in grads_and_vars:
-            if grad is not None:
-                grads_for_display.append((tf.clip_by_norm(grad, self.params['clamp_gradient_norm']), var))
-        self.ops['grads']= grads_for_display
-        self.ops['train_step'] = optimizer.apply_gradients(clipped_grads)
+
+        tf.summary.scalar("global_norm/clipped_gradient_norm",
+                     tf.global_norm(list(zip(*clipped_grads))[0]))
+
+        self.gs = tf.train.get_or_create_global_step()
+        self.ops['train_step'] = optimizer.apply_gradients(clipped_grads, self.gs)
         # Initialize newly-introduced variables:
         self.sess.run(tf.local_variables_initializer())
 
@@ -230,8 +240,8 @@ class ChemModel(object):
             else:
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = 1.0
                 fetch_list = [self.ops['mean_edge_loss']]
-
-
+            if step % 500 == 0 and self.summary_op is not None:
+                fetch_list.extend([self.summary_op, self.gs])
             result = self.sess.run(fetch_list, feed_dict=batch_data)
 
             """try:
@@ -243,6 +253,10 @@ class ChemModel(object):
 
             batch_loss = result[0]
             loss += batch_loss * num_graphs
+
+            if step % 500 == 0 and self.summary_op is not None:
+                summary, gs = result[-2:]
+                self.writer.add_summary(summary, gs)
 
             print("Running %s, batch %i (has %i graphs). Loss so far: %.4f" % (epoch_name,
                                                                                    step,
@@ -259,6 +273,7 @@ class ChemModel(object):
         log_to_save = []
         total_time_start = time.time()
         with self.graph.as_default():
+            self.writer.add_session_log(tf.SessionLog(status=tf.SessionLog.START), 0)
             for epoch in range(1, self.params['num_epochs'] + 1):
                 if not self.params['generation']:
                     print("== Epoch %i" % epoch)
@@ -289,6 +304,14 @@ class ChemModel(object):
                     self.generate_new_graphs(self.train_data)
 
     def save_model(self, path: str) -> None:
+        gs = self.sess.run(self.gs)
+        ckpt_path = os.path.join(self.checkpoint_dir, "cgvae-model")
+        self.saver.save(self.sess, ckpt_path, global_step=gs)
+        self.writer.add_session_log(tf.SessionLog(
+            status=tf.SessionLog.CHECKPOINT, checkpoint_path=ckpt_path),
+            gs)
+        self.writer.flush()
+
         weights_to_save = {}
         for variable in self.sess.graph.get_collection(tf.GraphKeys.GLOBAL_VARIABLES):
             assert variable.name not in weights_to_save
