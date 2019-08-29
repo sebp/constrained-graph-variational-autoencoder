@@ -500,44 +500,15 @@ class DenseGGNNChemModel(ChemModel):
         self.ops['node_symbol_loss'] = -tf.reduce_sum(tf.log(self.ops['node_symbol_prob'] + SMALL_NUMBER) * 
                                                       self.placeholders['node_symbols'], axis=[1,2])
         # Add in the loss for calculating QED
-        for (internal_id, task_id) in enumerate(self.params['task_ids']):
-            with tf.variable_scope("out_layer_task%i" % task_id):
-                with tf.variable_scope("regression_gate"):
-                    self.weights['regression_gate_task%i' % task_id] = MLP(self.params['hidden_size'], 1, [],
-                                                                           self.placeholders['out_layer_dropout_keep_prob'])
-                with tf.variable_scope("regression"):
-                    self.weights['regression_transform_task%i' % task_id] = MLP(self.params['hidden_size'], 1, [],
-                                                                               self.placeholders['out_layer_dropout_keep_prob'])
-                normalized_z_sampled=tf.nn.l2_normalize(self.ops['z_sampled'], 2)
-                self.ops['qed_computed_values']=computed_values = self.gated_regression(normalized_z_sampled,
-                                                        self.weights['regression_gate_task%i' % task_id],
-                                                        self.weights['regression_transform_task%i' % task_id], self.params["hidden_size"],
-                                                        self.weights['qed_weights'], self.weights['qed_biases'],
-                                                        self.placeholders['num_vertices'], self.placeholders['node_mask'])
-                diff = computed_values - self.placeholders['target_values'][internal_id,:]  # [b]
-                task_target_mask = self.placeholders['target_mask'][internal_id,:]
-                task_target_num = tf.reduce_sum(task_target_mask) + SMALL_NUMBER
-                diff = diff * task_target_mask  # Mask out unused values [b]
-                self.ops['accuracy_task%i' % task_id] = tf.reduce_sum(tf.abs(diff)) / task_target_num
-                task_loss = tf.reduce_sum(0.5 * tf.square(diff)) / task_target_num  # number
-                # Normalise loss to account for fewer task-specific examples in batch:
-                task_loss = task_loss * (1.0 / (self.params['task_sample_ratios'].get(task_id) or 1.0))
-                self.ops['qed_loss'].append(task_loss)
-                if task_id ==0: # Assume it is the QED score
-                    z_sampled_shape=tf.shape(self.ops['z_sampled'])
-                    flattened_z_sampled=tf.reshape(self.ops['z_sampled'], [z_sampled_shape[0], -1])
-                    self.ops['l2_loss'] = 0.01* tf.reduce_sum(flattened_z_sampled * flattened_z_sampled, axis=1) /2
-                    # Calculate the derivative with respect to QED + l2 loss
-                    self.ops['derivative_z_sampled'] = tf.gradients(self.ops['qed_computed_values'] -
-                                        self.ops['l2_loss'],self.ops['z_sampled'])        
-        self.ops['total_qed_loss'] = tf.reduce_sum(self.ops['qed_loss']) # number
         self.ops['mean_edge_loss'] = tf.reduce_mean(self.ops["edge_loss"]) # record the mean edge loss
         self.ops['mean_node_symbol_loss'] = tf.reduce_mean(self.ops["node_symbol_loss"])
         self.ops['mean_kl_loss'] = tf.reduce_mean(kl_trade_off_lambda *self.ops['kl_loss'])
-        self.ops['mean_total_qed_loss'] = self.params["qed_trade_off_lambda"]*self.ops['total_qed_loss']
-        return tf.reduce_mean(self.ops["edge_loss"] + self.ops['node_symbol_loss'] + \
-                              kl_trade_off_lambda *self.ops['kl_loss'])\
-                              + self.params["qed_trade_off_lambda"]*self.ops['total_qed_loss']
+        total_loss = tf.reduce_mean(self.ops["edge_loss"] + self.ops['node_symbol_loss'] + \
+                              kl_trade_off_lambda *self.ops['kl_loss'])
+
+
+
+        return total_loss
 
     def gated_regression(self, last_h, regression_gate, regression_transform, hidden_size, projection_weight, projection_bias, v, mask):
         # last_h: [b x v x h]
@@ -855,20 +826,6 @@ class DenseGGNNChemModel(ChemModel):
         step=0
         # generate a new molecule
         self.generate_graph_with_state(random_normal_states, num_vertices, generated_all_similes, elements, step, count)
-        fetch_list = [self.ops['derivative_z_sampled'], self.ops['qed_computed_values'], self.ops['l2_loss']]
-        for _ in range(self.params['optimization_step']):   
-            # get current qed and derivative
-            batch_feed_dict=self.get_dynamic_feed_dict(elements, None, None, num_vertices, None,
-                                       None, None, None, None,
-                                       random_normal_states)
-            derivative_z_sampled, qed_computed_values, l2_loss= self.sess.run(fetch_list, feed_dict=batch_feed_dict)
-            # update the states
-            random_normal_states=self.gradient_ascent(random_normal_states, 
-                                                      derivative_z_sampled[0])
-            # generate a new molecule
-            step+=1
-            self.generate_graph_with_state(random_normal_states, num_vertices,
-                                           generated_all_similes, elements, step, count)
         return random_normal_states
 
 
@@ -909,29 +866,19 @@ class DenseGGNNChemModel(ChemModel):
                                                 sampled_node_symbol, real_length,
                                                 random_normal_states, elements, num_vertices)
             # record the molecule with largest number of shapes
-            if dataset=='qm9' and new_mol is not None:
-                all_mol.append((np.sum(shape_count(self.params["dataset"], True, 
-                                [Chem.MolToSmiles(new_mol)])[1]), total_log_prob, new_mol))
-            # record the molecule with largest number of pentagon and hexagonal for zinc and cep
-            elif dataset=='zinc' and new_mol is not None:
-                counts=shape_count(self.params["dataset"], True,[Chem.MolToSmiles(new_mol)])
-                all_mol.append((0.5 * counts[1][2]+ counts[1][3], total_log_prob, new_mol))
-            elif dataset=='cep' and new_mol is not None:
-                all_mol.append((np.sum(shape_count(self.params["dataset"], True,
-                                [Chem.MolToSmiles(new_mol)])[1][2:]), total_log_prob, new_mol))
+            all_mol.append(new_mol)
+
         # select one out
-        best_mol = select_best(all_mol)
+        #best_mol = select_best(all_mol)
         # nothing generated
-        if best_mol is None:
-            return
+        #if best_mol is None:
+        #    return
         # visualize it 
-        make_dir('visualization_%s' % dataset)
-        visualize_mol('visualization_%s/%d_%d.png' % (dataset, count, step), best_mol)
+        #make_dir('visualization_%s' % dataset)
+        #visualize_mol('visualization_%s/%d_%d.png' % (dataset, count, step), best_mol)
         # record the best molecule
-        generated_all_similes.append(Chem.MolToSmiles(best_mol))
+        generated_all_similes.extend([Chem.MolToSmiles(mol) for mol in all_mol])
         dump('generated_smiles_%s' % (dataset), generated_all_similes)
-        print("Real QED value")
-        print(QED.qed(best_mol))
         if len(generated_all_similes) >= self.params['number_of_generation']:
             print("generation done")
             exit(0)
@@ -996,8 +943,6 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['initial_node_representation']: initial_representations,
                 self.placeholders['node_symbols']: batch_data['init'],
                 self.placeholders['latent_node_symbols']: initial_representations,                
-                self.placeholders['target_values']: np.transpose(batch_data['labels'], axes=[1,0]),
-                self.placeholders['target_mask']: np.transpose(batch_data['task_masks'], axes=[1, 0]),
                 self.placeholders['num_graphs']: num_graphs,
                 self.placeholders['num_vertices']: bucket_sizes[bucket],
                 self.placeholders['adjacency_matrix']: batch_data['adj_mat'],

@@ -111,10 +111,6 @@ class ChemModel(object):
         raise Exception("Models have to implement process_raw_graphs!")
 
     def make_model(self):
-        self.placeholders['target_values'] = tf.placeholder(tf.float32, [len(self.params['task_ids']), None],
-                                                            name='target_values')
-        self.placeholders['target_mask'] = tf.placeholder(tf.float32, [len(self.params['task_ids']), None],
-                                                          name='target_mask')
         self.placeholders['num_graphs'] = tf.placeholder(tf.int64, [], name='num_graphs')
         self.placeholders['out_layer_dropout_keep_prob'] = tf.placeholder(tf.float32, [], name='out_layer_dropout_keep_prob')
         # whether this session is for generating new graphs or not
@@ -149,9 +145,8 @@ class ChemModel(object):
         self.construct_logit_matrices()
 
         # Obtain losses for edges and edge types
-        self.ops['qed_loss'] = []
         self.ops['loss']=self.construct_loss()
-        
+
     def make_train_step(self):
         trainable_vars = self.sess.graph.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
         if self.args.get('--freeze-graph-model'):
@@ -226,16 +221,17 @@ class ChemModel(object):
                 self.params['batch_size'], batch_data[self.placeholders['num_vertices']],self.params['hidden_size'])
             if is_training:
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = self.params['out_layer_dropout_keep_prob']
-                fetch_list = [self.ops['loss'], self.ops['train_step'], 
-                              self.ops["edge_loss"], self.ops['kl_loss'], 
+                fetch_list = [self.ops['loss'], self.ops['train_step'],
+                              self.ops["edge_loss"], self.ops['kl_loss'],
                               self.ops['node_symbol_prob'], self.placeholders['node_symbols'],
-                              self.ops['qed_computed_values'], self.placeholders['target_values'], self.ops['total_qed_loss'],
                               self.ops['mean'], self.ops['logvariance'],
-                              self.ops['grads'], self.ops['mean_edge_loss'], self.ops['mean_node_symbol_loss'], 
-                              self.ops['mean_kl_loss'], self.ops['mean_total_qed_loss']]
+                              self.ops['mean_edge_loss'], self.ops['mean_node_symbol_loss'],
+                              self.ops['mean_kl_loss']]
             else:
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = 1.0
-                fetch_list = [self.ops['mean_edge_loss'], self.ops['accuracy_task0']]
+                fetch_list = [self.ops['mean_edge_loss']]
+
+
             result = self.sess.run(fetch_list, feed_dict=batch_data)
 
             """try:
