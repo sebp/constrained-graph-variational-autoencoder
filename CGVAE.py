@@ -170,9 +170,11 @@ class DenseGGNNChemModel(ChemModel):
                     new_h_dim=expanded_h_dim
                 for iter_idx in range(self.params['num_timesteps']):
                     with tf.variable_scope("gru_scope"+scope+str(iter_idx), reuse=False):
-                        self.weights['edge_weights'+scope+str(iter_idx)] = tf.Variable(glorot_init([self.num_edge_types, new_h_dim, new_h_dim]))
+                        self.weights['edge_weights'+scope+str(iter_idx)] = tf.Variable(
+                            glorot_init([self.num_edge_types, new_h_dim, new_h_dim]), name='edge_weights')
                         if self.params['use_edge_bias']:
-                            self.weights['edge_biases'+scope+str(iter_idx)] = tf.Variable(np.zeros([self.num_edge_types, 1, new_h_dim]).astype(np.float32))
+                            self.weights['edge_biases'+scope+str(iter_idx)] = tf.Variable(
+                                np.zeros([self.num_edge_types, 1, new_h_dim]).astype(np.float32), name='edge_biases')
                 
                         cell = tf.contrib.rnn.GRUCell(new_h_dim)
                         cell = tf.nn.rnn_cell.DropoutWrapper(cell,
@@ -184,9 +186,11 @@ class DenseGGNNChemModel(ChemModel):
                     new_h_dim=h_dim
                 else:
                     new_h_dim=expanded_h_dim
-                self.weights['edge_weights'+scope] = tf.Variable(glorot_init([self.num_edge_types, new_h_dim, new_h_dim]))
+                self.weights['edge_weights'+scope] = tf.Variable(
+                    glorot_init([self.num_edge_types, new_h_dim, new_h_dim]), name='edge_weights'+scope)
                 if self.params['use_edge_bias']:
-                    self.weights['edge_biases'+scope] = tf.Variable(np.zeros([self.num_edge_types, 1, new_h_dim]).astype(np.float32))
+                    self.weights['edge_biases'+scope] = tf.Variable(
+                        np.zeros([self.num_edge_types, 1, new_h_dim]).astype(np.float32), name='edge_biases'+scope)
                 with tf.variable_scope("gru_scope"+scope):
                     cell = tf.contrib.rnn.GRUCell(new_h_dim)
                     cell = tf.nn.rnn_cell.DropoutWrapper(cell,
@@ -194,38 +198,46 @@ class DenseGGNNChemModel(ChemModel):
                     self.weights['node_gru'+scope] = cell
 
         # weights for calculating mean and variance
-        self.weights['mean_weights'] = tf.Variable(glorot_init([h_dim, h_dim]))
-        self.weights['mean_biases'] = tf.Variable(np.zeros([1, h_dim]).astype(np.float32))
-        self.weights['variance_weights'] = tf.Variable(glorot_init([h_dim, h_dim]))
-        self.weights['variance_biases'] = tf.Variable(np.zeros([1, h_dim]).astype(np.float32))
+        self.weights['mean_weights'] = tf.Variable(glorot_init([h_dim, h_dim]), name='mean_weights')
+        self.weights['mean_biases'] = tf.Variable(np.zeros([1, h_dim]).astype(np.float32), name='mean_biases')
+        self.weights['variance_weights'] = tf.Variable(glorot_init([h_dim, h_dim]), name='variance_weights')
+        self.weights['variance_biases'] = tf.Variable(np.zeros([1, h_dim]).astype(np.float32), name='variance_biases')
 
         # The weights for generating nodel symbol logits    
-        self.weights['node_symbol_weights'] = tf.Variable(glorot_init([h_dim, self.params['num_symbols']]))
-        self.weights['node_symbol_biases'] = tf.Variable(np.zeros([1, self.params['num_symbols']]).astype(np.float32))
-        
+        self.weights['node_symbol_weights'] = tf.Variable(glorot_init([h_dim, self.params['num_symbols']]),
+            name='node_symbol_weights')
+        self.weights['node_symbol_biases'] = tf.Variable(np.zeros([1, self.params['num_symbols']]).astype(np.float32),
+            name='node_symbol_biases')
+
         feature_dimension=6*expanded_h_dim
         # record the total number of features
         self.params["feature_dimension"] = 6
         # weights for generating edge type logits
         for i in range(self.num_edge_types):
-            self.weights['edge_type_%d' % i] = tf.Variable(glorot_init([feature_dimension, feature_dimension]))
-            self.weights['edge_type_biases_%d' % i] = tf.Variable(np.zeros([1, feature_dimension]).astype(np.float32)) 
-            self.weights['edge_type_output_%d' % i] = tf.Variable(glorot_init([feature_dimension, 1]))
+            self.weights['edge_type_%d' % i] = tf.Variable(glorot_init([feature_dimension, feature_dimension]),
+                name='kernel_edge_type_%d' % i)
+            self.weights['edge_type_biases_%d' % i] = tf.Variable(np.zeros([1, feature_dimension]).astype(np.float32),
+                name='edge_type_biases_%d' % i)
+            self.weights['edge_type_output_%d' % i] = tf.Variable(glorot_init([feature_dimension, 1]),
+                name='kernel_edge_type_output_%d' % i)
         # weights for generating edge logits
-        self.weights['edge_iteration'] = tf.Variable(glorot_init([feature_dimension, feature_dimension]))
-        self.weights['edge_iteration_biases'] = tf.Variable(np.zeros([1, feature_dimension]).astype(np.float32)) 
-        self.weights['edge_iteration_output'] = tf.Variable(glorot_init([feature_dimension, 1]))            
+        self.weights['edge_iteration'] = tf.Variable(glorot_init([feature_dimension, feature_dimension]),
+            name='kernel_edge_iteration')
+        self.weights['edge_iteration_biases'] = tf.Variable(np.zeros([1, feature_dimension]).astype(np.float32),
+            name='kernel_edge_iteration_biases')
+        self.weights['edge_iteration_output'] = tf.Variable(glorot_init([feature_dimension, 1]),
+            name='kernel_edge_iteration_output')
         # Weights for the stop node
-        self.weights["stop_node"] = tf.Variable(glorot_init([1, expanded_h_dim]))
+        self.weights["stop_node"] = tf.Variable(glorot_init([1, expanded_h_dim]), name='kernel_stop_node')
         # Weight for distance embedding
-        self.weights['distance_embedding'] = tf.Variable(glorot_init([self.params['maximum_distance'], expanded_h_dim]))
+        self.weights['distance_embedding'] = tf.Variable(glorot_init([self.params['maximum_distance'],
+            expanded_h_dim]), name='kernel_distance_embedding')
         # Weight for overlapped edge feature
-        self.weights["overlapped_edge_weight"] = tf.Variable(glorot_init([2, expanded_h_dim]))
-        # weights for linear projection on qed prediction input
-        self.weights['qed_weights'] = tf.Variable(glorot_init([h_dim, h_dim]))
-        self.weights['qed_biases'] = tf.Variable(np.zeros([1, h_dim]).astype(np.float32))
+        self.weights["overlapped_edge_weight"] = tf.Variable(glorot_init([2, expanded_h_dim]),
+            name='kernel_overlapped_edge_weight')
         # use node embeddings
-        self.weights["node_embedding"]= tf.Variable(glorot_init([self.params["num_symbols"], h_dim]))
+        self.weights["node_embedding"]= tf.Variable(glorot_init([self.params["num_symbols"], h_dim]),
+            name='kernel_node_embedding')
         
         # graph state mask
         self.ops['graph_state_mask']= tf.expand_dims(self.placeholders['node_mask'], 2)
