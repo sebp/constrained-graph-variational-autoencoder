@@ -319,6 +319,11 @@ class ChemModel(object):
                 if epoch >= self.params['epoch_to_generate']:
                     self.generate_new_graphs(self.train_data)
 
+    def generate(self):
+        with self.graph.as_default():
+            self.restore_from_checkpoint()
+            self.generate_new_graphs(self.valid_data)
+
     def save_model(self, path: str) -> None:
         gs = self.sess.run(self.gs)
         ckpt_path = os.path.join(self.checkpoint_dir, "cgvae-model")
@@ -367,3 +372,10 @@ class ChemModel(object):
                     print('Saved weights for %s not used by model.' % var_name)
             restore_ops.append(tf.variables_initializer(variables_to_initialize))
             self.sess.run(restore_ops)
+
+    def restore_from_checkpoint(self):
+        save_path = tf.train.latest_checkpoint(self.checkpoint_dir)
+        if save_path is None:
+            raise ValueError("no checkpoint in %s" % self.checkpoint_dir)
+        print("Restoring from %s" % save_path)
+        self.saver.restore(self.sess, save_path)
