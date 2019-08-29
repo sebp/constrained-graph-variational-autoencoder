@@ -62,22 +62,19 @@ class DenseGGNNChemModel(ChemModel):
                         'clamp_gradient_norm': 1.0,
                         'out_layer_dropout_keep_prob': 1.0,
 
-                        'tie_fwd_bkwd': True,
+                        'tie_fwd_bkwd': None,
                         'task_ids': [0],             # id of property prediction
 
                         'random_seed': 0,            # fixed for reproducibility 
                        
                         'batch_size': 8 if dataset=='zinc' or dataset=='cep' else 64,              
                         "qed_trade_off_lambda": 10,
-                        'prior_learning_rate': 0.05,
-                        'stop_criterion': 0.01,
                         'num_epochs': 3 if dataset=='zinc' or dataset=='cep' else 10,
-                        'epoch_to_generate': 3 if dataset=='zinc' or dataset=='cep' else 10,
-                        'number_of_generation': 30000,
-                        'optimization_step': 0,      
-                        'maximum_distance': 50,
+                        'epoch_to_generate': 9999, #if dataset=='zinc' or dataset=='cep' else 10,
+                        'number_of_generation': 50000,
+                        'maximum_distance': 10,
                         "use_argmax_generation": False,    # use random sampling or argmax during generation
-                        'residual_connection_on': True,    # whether residual connection is on
+                        'residual_connection_on': False,    # whether residual connection is on
                         'residual_connections': {          # For iteration i, specify list of layers whose output is added as an input
                                 2: [0],
                                 4: [0, 2],
@@ -87,7 +84,7 @@ class DenseGGNNChemModel(ChemModel):
                                 12: [0, 2, 4, 6, 8, 10],
                                 14: [0, 2, 4, 6, 8, 10, 12],
                             },
-                        'num_timesteps': 12,           # gnn propagation step
+                        'num_timesteps': 7,           # gnn propagation step
                         'hidden_size': 100,        
                         "kl_trade_off_lambda": 0.3,    # kl tradeoff
                         'learning_rate': 0.001, 
@@ -97,15 +94,15 @@ class DenseGGNNChemModel(ChemModel):
                         'train_file': 'data/molecules_train_%s.json' % dataset,
                         'valid_file': 'data/molecules_valid_%s.json' % dataset,
 
-                        'try_different_starting': True,
-                        "num_different_starting": 6,
+                        'try_different_starting': False,
+                        "num_different_starting": 1,
 
                         'generation': False,        # only for generation
                         'use_graph': True,          # use gnn
                         "label_one_hot": False,     # one hot label or not
-                        "multi_bfs_path": False,    # whether sample several BFS paths for each molecule
-                        "bfs_path_count": 30,       
-                        "path_random_order": False, # False: canonical order, True: random order
+                        "multi_bfs_path": True,    # whether sample several BFS paths for each molecule
+                        "bfs_path_count": 6,
+                        "path_random_order": True, # False: canonical order, True: random order
                         "sample_transition": False, # whether use transition sampling
                         'edge_weight_dropout_keep_prob': 1,
                         'check_overlap_edge': False,
