@@ -875,8 +875,11 @@ class DenseGGNNChemModel(ChemModel):
         #visualize_mol('visualization_%s/%d_%d.png' % (dataset, count, step), best_mol)
         # record the best molecule
         generated_all_similes.extend([Chem.MolToSmiles(mol) for mol in all_mol])
-        dump('generated_smiles_%s' % (dataset), generated_all_similes)
         if len(generated_all_similes) >= self.params['number_of_generation']:
+            with open('generated_smiles_%s.txt' % dataset, 'w') as fout:
+                for smi in generated_all_similes:
+                    fout.write(smi)
+                    fout.write("\n")
             print("generation done")
             exit(0)
 
@@ -888,7 +891,7 @@ class DenseGGNNChemModel(ChemModel):
         elements['adj_mat']=np.zeros((self.num_edge_types, maximum_length, maximum_length))
         return maximum_length
 
-    def generate_new_graphs(self, data): 
+    def generate_new_graphs(self, data):
         # bucketed: data organized by bucket
         (bucketed, bucket_sizes, bucket_at_step) = data  
         bucket_counters = defaultdict(int)        
