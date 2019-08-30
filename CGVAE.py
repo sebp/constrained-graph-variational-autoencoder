@@ -210,13 +210,13 @@ class DenseGGNNChemModel(ChemModel):
         # record the total number of features
         self.params["feature_dimension"] = 6
         # weights for generating edge type logits
-        for i in range(self.num_edge_types):
-            self.weights['edge_type_%d' % i] = tf.Variable(glorot_init([feature_dimension, feature_dimension]),
-                name='kernel_edge_type_%d' % i)
-            self.weights['edge_type_biases_%d' % i] = tf.Variable(np.zeros([1, feature_dimension]).astype(np.float32),
-                name='edge_type_biases_%d' % i)
-            self.weights['edge_type_output_%d' % i] = tf.Variable(glorot_init([feature_dimension, 1]),
-                name='kernel_edge_type_output_%d' % i)
+
+        self.weights['edge_type'] = tf.Variable(glorot_init([feature_dimension, feature_dimension]),
+            name='kernel_edge_type')
+        self.weights['edge_type_biases'] = tf.Variable(np.zeros([1, feature_dimension]).astype(np.float32),
+            name='edge_type_biases')
+        self.weights['edge_type_output'] = tf.Variable(glorot_init([feature_dimension, self.num_edge_types]),
+            name='kernel_edge_type_output')
         # weights for generating edge logits
         self.weights['edge_iteration'] = tf.Variable(glorot_init([feature_dimension, feature_dimension]),
             name='kernel_edge_iteration')
@@ -335,8 +335,12 @@ class DenseGGNNChemModel(ChemModel):
         return z_sampled
 
     def fully_connected(self, input, hidden_weight, hidden_bias, output_weight):
-        output=tf.nn.relu(tf.matmul(input, hidden_weight) + hidden_bias)       
-        output=tf.matmul(output, output_weight) 
+        if input.get_shape().ndims > 2:
+            matmul = tf.tensordot
+        else:
+            matmul = tf.matmul
+        output=tf.nn.relu(matmul(input, hidden_weight) + hidden_bias)
+        output=matmul(output, output_weight)
         return output
 
     def generate_cross_entropy(self, idx, cross_entropy_losses, edge_predictions, edge_type_predictions):
@@ -423,14 +427,11 @@ class DenseGGNNChemModel(ChemModel):
         edge_logits = tf.concat([edge_logits, stop_logits], axis=1) # [b, v + 1]
 
         # Calculate edge type logits
-        edge_type_logits = []
-        for i in range(self.num_edge_types):
-            edge_type_logit = self.fully_connected(combined_edge_repr, 
-                              self.weights['edge_type_%d' % i], self.weights['edge_type_biases_%d' % i],
-                              self.weights['edge_type_output_%d' % i]) #[b * v, 1]                        
-            edge_type_logits.append(tf.reshape(edge_type_logit, [-1, 1, v])) # [b, 1, v]
-        
-        edge_type_logits = tf.concat(edge_type_logits, axis=1) # [b, e, v]
+        edge_type_logits = self.fully_connected(combined_edge_repr,
+                            self.weights['edge_type'], self.weights['edge_type_biases'],
+                            self.weights['edge_type_output']) # [b * v, e]
+        edge_type_logits = tf.reshape(edge_type_logits, [-1, self.num_edge_types, v]) # [b, e, v]
+
         # filter invalid items
         edge_type_logits = edge_type_logits + edge_type_masks # [b, e, v]
         # softmax over edge type axis
