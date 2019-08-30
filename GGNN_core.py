@@ -95,6 +95,9 @@ class ChemModel(object):
             self.writer.add_graph(self.graph)
             self.summary_op = tf.summary.merge_all()
 
+            # Initialize newly-introduced variables:
+            self.sess.run(tf.local_variables_initializer())
+
             # Restore/initialize variables:
             restore_file = args.get('--restore')
             if restore_file is not None:
@@ -181,26 +184,25 @@ class ChemModel(object):
                     print("Freezing weights of variable %s." % var.name)
             trainable_vars = filtered_vars
 
-        optimizer = tf.train.AdamOptimizer(self.params['learning_rate'])
-        grads_and_vars = optimizer.compute_gradients(self.ops['loss'], var_list=trainable_vars)
-
-        tf.summary.scalar("global_norm/gradient_norm",
-            tf.global_norm(list(zip(*grads_and_vars))[0]))
-
-        clipped_grads = []
-        for grad, var in grads_and_vars:
-            if grad is not None:
-                clipped_grads.append((tf.clip_by_norm(grad, self.params['clamp_gradient_norm']), var))
-            else:
-                clipped_grads.append((grad, var))
-
-        tf.summary.scalar("global_norm/clipped_gradient_norm",
-                     tf.global_norm(list(zip(*clipped_grads))[0]))
-
         self.gs = tf.train.get_or_create_global_step()
-        self.ops['train_step'] = optimizer.apply_gradients(clipped_grads, self.gs)
-        # Initialize newly-introduced variables:
-        self.sess.run(tf.local_variables_initializer())
+        with tf.variable_scope("OptimizeLoss", values=trainable_vars):
+            optimizer = tf.train.AdamOptimizer(self.params['learning_rate'])
+            grads_and_vars = optimizer.compute_gradients(self.ops['loss'], var_list=trainable_vars)
+
+            tf.summary.scalar("global_norm/gradient_norm",
+                tf.global_norm(list(zip(*grads_and_vars))[0]))
+
+            clipped_grads = []
+            for grad, var in grads_and_vars:
+                if grad is not None:
+                    clipped_grads.append((tf.clip_by_norm(grad, self.params['clamp_gradient_norm']), var))
+                else:
+                    clipped_grads.append((grad, var))
+
+            tf.summary.scalar("global_norm/clipped_gradient_norm",
+                        tf.global_norm(list(zip(*clipped_grads))[0]))
+
+            self.ops['train_step'] = optimizer.apply_gradients(clipped_grads, self.gs)
 
     def gated_regression(self, last_h, regression_gate, regression_transform):
         raise Exception("Models have to implement gated_regression!")
