@@ -62,7 +62,7 @@ class DenseGGNNChemModel(ChemModel):
                         'clamp_gradient_norm': 1.0,
                         'out_layer_dropout_keep_prob': 1.0,
 
-                        'tie_fwd_bkwd': None,
+                        'tie_fwd_bkwd': True,
                         'task_ids': [0],             # id of property prediction
 
                         'random_seed': 0,            # fixed for reproducibility 
