@@ -11,8 +11,8 @@ from rdkit.Chem import rdmolops
 from collections import defaultdict, deque
 import os
 import heapq
-import planarity
-import sascorer
+# import planarity
+# import sascorer
 from rdkit.Chem import Crippen
 from rdkit.Chem import QED
 
@@ -28,9 +28,9 @@ number_to_bond= {0: Chem.rdchem.BondType.SINGLE, 1:Chem.rdchem.BondType.DOUBLE,
 
 def dataset_info(dataset): #qm9, zinc, cep
     if dataset=='qm9':
-        return { 'atom_types': ["H", "C", "N", "O", "F"],
-                 'maximum_valence': {0: 1, 1: 4, 2: 3, 3: 2, 4: 1},
-                 'number_to_atom': {0: "H", 1: "C", 2: "N", 3: "O", 4: "F"},
+        return { 'atom_types': ["C", "N", "O", "F"],
+                 'maximum_valence': {0: 4, 1: 3, 2: 2, 3: 1},
+                 'number_to_atom': {0: "C", 1: "N", 2: "O", 3: "F"},
                  'bucket_sizes': np.array(list(range(4, 28, 2)) + [29])
                }
     elif dataset=='zinc':
