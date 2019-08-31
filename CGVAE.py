@@ -154,8 +154,6 @@ class DenseGGNNChemModel(ChemModel):
         self.placeholders['z_prior']=tf.placeholder(tf.float32, [None, None, self.params['hidden_size']], name='z_prior') # the prior of z sampled from normal distribution
         # put in front of kl latent loss
         self.placeholders['kl_trade_off_lambda']=tf.placeholder(tf.float32, [], name='kl_trade_off_lambda') # number
-        # overlapped edge features
-        self.placeholders['overlapped_edge_features']=tf.placeholder(tf.int32, [None, None, None], name='overlapped_edge_features') # [b, es, v]
 
         # weights for encoder and decoder GNN. 
         if self.params["residual_connection_on"]:
@@ -206,9 +204,9 @@ class DenseGGNNChemModel(ChemModel):
         self.weights['node_symbol_biases'] = tf.Variable(np.zeros([1, self.params['num_symbols']]).astype(np.float32),
             name='node_symbol_biases')
 
-        feature_dimension=6*expanded_h_dim
+        feature_dimension=5*expanded_h_dim
         # record the total number of features
-        self.params["feature_dimension"] = 6
+        self.params["feature_dimension"] = 5
         # weights for generating edge type logits
 
         self.weights['edge_type'] = tf.Variable(glorot_init([feature_dimension, feature_dimension]),
@@ -229,9 +227,6 @@ class DenseGGNNChemModel(ChemModel):
         # Weight for distance embedding
         self.weights['distance_embedding'] = tf.Variable(glorot_init([self.params['maximum_distance'],
             expanded_h_dim]), name='kernel_distance_embedding')
-        # Weight for overlapped edge feature
-        self.weights["overlapped_edge_weight"] = tf.Variable(glorot_init([2, expanded_h_dim]),
-            name='kernel_overlapped_edge_weight')
         # use node embeddings
         self.weights["node_embedding"]= tf.Variable(glorot_init([self.params["num_symbols"], h_dim]),
             name='kernel_node_embedding')
@@ -353,7 +348,6 @@ class DenseGGNNChemModel(ChemModel):
         # data needed in this iteration
         incre_adj_mat = self.placeholders['incre_adj_mat'][:,idx,:,:, :]                                # [b, e, v, v]
         distance_to_others = self.placeholders['distance_to_others'][:, idx, :]                         # [b,v]
-        overlapped_edge_features = self.placeholders['overlapped_edge_features'][:, idx, :] # [b,v]
         node_sequence = self.placeholders['node_sequence'][:, idx, :] # [b, v]
         node_sequence = tf.expand_dims(node_sequence, axis=2) # [b,v,1]
         edge_type_masks = self.placeholders['edge_type_masks'][:, idx, :, :] # [b, e, v]
@@ -399,11 +393,10 @@ class DenseGGNNChemModel(ChemModel):
         global_graph_repr = tf.tile(global_graph_repr, [1,v,1]) # [b, v, h+h]
         # distance representation
         distance_repr = tf.nn.embedding_lookup(self.weights['distance_embedding'], distance_to_others) # [b, v, h+h]
-        # overlapped edge feature representation
-        overlapped_edge_repr = tf.nn.embedding_lookup(self.weights['overlapped_edge_weight'], overlapped_edge_features) # [b, v, h+h]
+
         # concat and reshape.
         combined_edge_repr = tf.concat([edge_repr, local_graph_repr,
-                                       global_graph_repr, distance_repr, overlapped_edge_repr], axis=2)
+                                       global_graph_repr, distance_repr], axis=2)
       
         combined_edge_repr = tf.reshape(combined_edge_repr, [-1, self.params["feature_dimension"]*(h_dim + h_dim + 1)]) 
         # Calculate edge logits
@@ -416,10 +409,9 @@ class DenseGGNNChemModel(ChemModel):
         # prepare the data
         expanded_stop_node = tf.tile(self.weights['stop_node'], [batch_size, 1]) # [b, h + h]
         distance_to_stop_node = tf.nn.embedding_lookup(self.weights['distance_embedding'], tf.tile([0], [batch_size]))     # [b, h + h]
-        overlap_edge_stop_node = tf.nn.embedding_lookup(self.weights['overlapped_edge_weight'], tf.tile([0], [batch_size]))     # [b, h + h]
          
         combined_stop_node_repr = tf.concat([node_in_focus, expanded_stop_node, local_graph_repr_before_expansion, 
-                                     global_graph_repr_before_expansion, distance_to_stop_node, overlap_edge_stop_node], axis=1) # [b, 6 * (h + h)]
+                                     global_graph_repr_before_expansion, distance_to_stop_node], axis=1) # [b, 6 * (h + h)]
         # logits for stop node                                    
         stop_logits = self.fully_connected(combined_stop_node_repr, 
                             self.weights['edge_iteration'], self.weights['edge_iteration_biases'],
@@ -688,11 +680,10 @@ class DenseGGNNChemModel(ChemModel):
         return batch_data
 
     def get_dynamic_feed_dict(self, elements, latent_node_symbol, incre_adj_mat, num_vertices, 
-                    distance_to_others, overlapped_edge_dense, node_sequence, edge_type_masks, edge_masks, random_normal_states):
+                    distance_to_others, node_sequence, edge_type_masks, edge_masks, random_normal_states):
         if incre_adj_mat is None:
             incre_adj_mat=np.zeros((1, 1, self.num_edge_types, 1, 1))
             distance_to_others=np.zeros((1,1,1))
-            overlapped_edge_dense=np.zeros((1,1,1))
             node_sequence=np.zeros((1,1,1))
             edge_type_masks=np.zeros((1,1,self.num_edge_types,1))
             edge_masks=np.zeros((1,1,1))
@@ -715,7 +706,6 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['is_generative']: True, 
                 self.placeholders['out_layer_dropout_keep_prob'] : 1.0, 
                 self.placeholders['distance_to_others'] : distance_to_others, # [1, 1,v]
-                self.placeholders['overlapped_edge_features']: overlapped_edge_dense,
                 self.placeholders['max_iteration_num']: 1,
                 self.placeholders['node_sequence']: node_sequence, #[1, 1, v]
                 self.placeholders['edge_type_masks']: edge_type_masks, #[1, 1, e, v]
@@ -765,16 +755,13 @@ class DenseGGNNChemModel(ChemModel):
                 node_sequence = node_sequence_to_dense([node_in_focus], max_n_vertices) # [1, v]
                 distance_to_others_sparse = bfs_distance(node_in_focus, incre_adj_list)
                 distance_to_others = distance_to_others_dense([distance_to_others_sparse],max_n_vertices) # [1, v]
-                overlapped_edge_sparse = get_overlapped_edge_feature(edge_mask_sparse, color, new_mol)
-                          
-                overlapped_edge_dense = overlapped_edge_features_to_dense([overlapped_edge_sparse],max_n_vertices) # [1, v]
                 incre_adj_mat = incre_adj_mat_to_dense([incre_adj_list], 
                     self.num_edge_types, max_n_vertices) # [1, e, v, v]
                 sampled_node_symbol_one_hot = self.node_symbol_one_hot(sampled_node_symbol, real_n_vertices, max_n_vertices)
 
                 # get feed_dict
                 feed_dict=self.get_dynamic_feed_dict(elements, [sampled_node_symbol_one_hot],
-                            [incre_adj_mat], max_n_vertices, [distance_to_others], [overlapped_edge_dense],
+                            [incre_adj_mat], max_n_vertices, [distance_to_others],
                             [node_sequence], [edge_type_mask], [edge_mask], random_normal_states)
 
                 # fetch nn predictions
@@ -832,7 +819,7 @@ class DenseGGNNChemModel(ChemModel):
         # Get back node symbol predictions
         # Prepare dict
         node_symbol_batch_feed_dict=self.get_dynamic_feed_dict(elements, None, None,
-                                     num_vertices, None, None, None, None, None, random_normal_states)
+                                     num_vertices, None, None, None, None, random_normal_states)
         # Get predicted node probs
         predicted_node_symbol_prob=self.get_node_symbol(node_symbol_batch_feed_dict)
         # Node numbers for each graph
@@ -961,7 +948,6 @@ class DenseGGNNChemModel(ChemModel):
                 self.placeholders['local_stop']: batch_data['local_stop'],
                 self.placeholders['max_iteration_num']: batch_data['max_iteration_num'],
                 self.placeholders['kl_trade_off_lambda']: self.params['kl_trade_off_lambda'],
-                self.placeholders['overlapped_edge_features']: batch_data['overlapped_edge_features']
             }
             bucket_counters[bucket] += 1
             yield batch_feed_dict
