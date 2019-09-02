@@ -331,7 +331,7 @@ class DenseGGNNChemModel(ChemModel):
 
     def fully_connected(self, input, hidden_weight, hidden_bias, output_weight):
         if input.get_shape().ndims > 2:
-            matmul = tf.tensordot
+            matmul = lambda x, y: tf.tensordot(x, y, [[2], [0]])
         else:
             matmul = tf.matmul
         output=tf.nn.relu(matmul(input, hidden_weight) + hidden_bias)
@@ -397,8 +397,6 @@ class DenseGGNNChemModel(ChemModel):
         # concat and reshape.
         combined_edge_repr = tf.concat([edge_repr, local_graph_repr,
                                        global_graph_repr, distance_repr], axis=2)
-      
-        combined_edge_repr = tf.reshape(combined_edge_repr, [-1, self.params["feature_dimension"]*(h_dim + h_dim + 1)]) 
         # Calculate edge logits
         edge_logits=self.fully_connected(combined_edge_repr, self.weights['edge_iteration'],
                                         self.weights['edge_iteration_biases'], self.weights['edge_iteration_output'])
@@ -421,8 +419,8 @@ class DenseGGNNChemModel(ChemModel):
         # Calculate edge type logits
         edge_type_logits = self.fully_connected(combined_edge_repr,
                             self.weights['edge_type'], self.weights['edge_type_biases'],
-                            self.weights['edge_type_output']) # [b * v, e]
-        edge_type_logits = tf.reshape(edge_type_logits, [-1, self.num_edge_types, v]) # [b, e, v]
+                            self.weights['edge_type_output']) # [b, v, e]
+        edge_type_logits = tf.transpose(edge_type_logits, [0, 2, 1]) # [b, e, v]
 
         # filter invalid items
         edge_type_logits = edge_type_logits + edge_type_masks # [b, e, v]
