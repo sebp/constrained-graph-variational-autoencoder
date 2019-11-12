@@ -21,7 +21,7 @@ def load_save_disk(f, filename):
         else:
             results = f(*args, **kwargs)
             with open(ff, "wb") as fout:
-                pickle.dump(results, fout)
+                pickle.dump(results, fout, pickle.HIGHEST_PROTOCOL)
         return results
     return inner
 
