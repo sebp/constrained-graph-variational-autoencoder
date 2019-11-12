@@ -21,7 +21,7 @@ import utils
 import pickle
 import random
 from docopt import docopt
-from get_qm9 import preprocess
+from get_qm9 import preprocess, read_smiles
 
 dataset = "zinc"
 
@@ -47,14 +47,9 @@ def train_valid_split(download_path):
         if file_count % 2000 ==0:
             print('finished reading: %d' % file_count, end='\r')
     return raw_data
-            
-if __name__ == "__main__":
-    download_path = '250k_rndm_zinc_drugs_clean_3.csv'
-    if not os.path.exists(download_path):
-        print('downloading data to %s ...' % download_path)
-        source = 'https://raw.githubusercontent.com/aspuru-guzik-group/chemical_vae/master/models/zinc_properties/250k_rndm_zinc_drugs_clean_3.csv'
-        os.system('wget -O %s %s' % (download_path, source))
-        print('finished downloading')
 
-    raw_data = train_valid_split(download_path)
+
+if __name__ == "__main__":
+    fname = "./zinc/zinc250k_{}.smiles"
+    raw_data = {k: read_smiles(fname.format(k)) for k in ("train", "valid")}
     preprocess(raw_data, dataset)
