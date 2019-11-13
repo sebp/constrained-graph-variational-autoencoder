@@ -93,6 +93,9 @@ class ChemModel(object):
                 self.sess.graph.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
             self.writer = tf.summary.FileWriterCache.get(self.checkpoint_dir)
             self.writer.add_graph(self.graph)
+            self.writer_valid = tf.summary.FileWriterCache.get(
+                    os.path.join(self.checkpoint_dir, "eval"))
+            self.writer_valid.add_graph(self.graph)
             self.summary_op = tf.summary.merge_all()
 
             # Initialize newly-introduced variables:
@@ -249,6 +252,7 @@ class ChemModel(object):
                 self.params['batch_size'], batch_data[self.placeholders['num_vertices']],self.params['hidden_size'])
             if is_training:
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = self.params['out_layer_dropout_keep_prob']
+                writer = self.writer
                 fetch_list = [self.ops['loss'], self.ops['train_step'],
                               self.ops["edge_loss"], self.ops['kl_loss'],
                               self.ops['node_symbol_prob'], self.placeholders['node_symbols'],
@@ -257,6 +261,7 @@ class ChemModel(object):
                               self.ops['mean_kl_loss']]
             else:
                 batch_data[self.placeholders['out_layer_dropout_keep_prob']] = 1.0
+                writer = self.writer_valid
                 fetch_list = [self.ops['mean_edge_loss']]
             if step % 500 == 0 and self.summary_op is not None:
                 fetch_list.extend([self.summary_op, self.gs])
@@ -274,7 +279,7 @@ class ChemModel(object):
 
             if step % 500 == 0 and self.summary_op is not None:
                 summary, gs = result[-2:]
-                self.writer.add_summary(summary, gs)
+                writer.add_summary(summary, gs)
 
             print("Running %s, batch %i (has %i graphs). Loss so far: %.4f" % (epoch_name,
                                                                                    step,
@@ -291,11 +296,12 @@ class ChemModel(object):
         log_to_save = []
         total_time_start = time.time()
         with self.graph.as_default():
-            self.writer.add_session_log(tf.SessionLog(status=tf.SessionLog.START), 0)
+            for writer in (self.writer, self.writer_valid):
+                writer.add_session_log(tf.SessionLog(status=tf.SessionLog.START), 0)
             for epoch in range(1, self.params['num_epochs'] + 1):
                 if not self.params['generation']:
                     print("== Epoch %i" % epoch)
-     
+
                     train_loss, train_speed = self.run_epoch("epoch %i (training)" % epoch, epoch,
                                                                                      self.train_data, True)
                     print("\r\x1b[K Train: loss: %.5f| instances/sec: %.2f" % (train_loss, train_speed))
