@@ -52,6 +52,8 @@ class DenseGGNNChemModel(ChemModel):
     def __init__(self, args):
         super().__init__(args)
 
+        self.make_minibatch_iterator = self._make_minibatch_iterator_from_file
+
     @classmethod
     def default_params(cls):
         params = dict(super().default_params())
@@ -906,49 +908,94 @@ class DenseGGNNChemModel(ChemModel):
                 count+=1
             bucket_counters[bucket] += 1
 
-    def make_minibatch_iterator(self, data, is_training: bool):
+    def _make_minibatch_iterator_from_file(self, data, is_training: bool):
+        bucket_sizes = dataset_info(self.params["dataset"])["bucket_sizes"].copy()
+        if is_training:
+            np.random.shuffle(bucket_sizes)
+
+        batch_size = self.params["batch_size"]
+        for bucket_size in bucket_sizes:
+            fname = "{}/data_{}_{:03d}.pkl".format(data, self.params["dataset"], bucket_size)
+            print("Loading", fname)
+            with open(fname, "rb") as fin:
+                bucketed = pickle.load(fin)
+
+            n_samples = len(bucketed)
+            indices = np.arange(n_samples)
+            if is_training:
+                np.random.shuffle(indices)
+
+            if is_training:
+                num_batches = n_samples // batch_size
+            else:
+                num_batches = int(np.ceil(n_samples / batch_size))
+
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, n_samples)
+                elements = [bucketed[i] for i in indices[start_idx:end_idx]]
+                batch_data = self.make_batch(elements, bucket_size)
+
+                yield self._make_feed_dict(batch_data, len(elements), bucket_size, is_training)
+
+    def _make_minibatch_iterator_from_memory(self, data, is_training: bool):
         (bucketed, bucket_sizes, bucket_at_step) = data
         if is_training:
             np.random.shuffle(bucket_at_step)
             for _, bucketed_data in bucketed.items():
                 np.random.shuffle(bucketed_data)
+
         bucket_counters = defaultdict(int)
-        dropout_keep_prob = self.params['graph_state_dropout_keep_prob'] if is_training else 1.
-        edge_dropout_keep_prob = self.params['edge_weight_dropout_keep_prob'] if is_training else 1.
         for step in range(len(bucket_at_step)):
             bucket = bucket_at_step[step]
             start_idx = bucket_counters[bucket] * self.params['batch_size']
             end_idx = (bucket_counters[bucket] + 1) * self.params['batch_size']
             elements = bucketed[bucket][start_idx:end_idx]
-            batch_data = self.make_batch(elements, bucket_sizes[bucket])
+            bucket_size = bucket_sizes[bucket]
+            batch_data = self.make_batch(elements, bucket_size)
 
-            num_graphs = len(batch_data['init'])
-            initial_representations = batch_data['init']
-            initial_representations = self.pad_annotations(initial_representations)
-            batch_feed_dict = {
-                self.placeholders['initial_node_representation']: initial_representations,
-                self.placeholders['node_symbols']: batch_data['init'],
-                self.placeholders['latent_node_symbols']: initial_representations,                
-                self.placeholders['num_graphs']: num_graphs,
-                self.placeholders['num_vertices']: bucket_sizes[bucket],
-                self.placeholders['adjacency_matrix']: batch_data['adj_mat'],
-                self.placeholders['node_mask']: batch_data['node_mask'],
-                self.placeholders['graph_state_keep_prob']: dropout_keep_prob,
-                self.placeholders['edge_weight_dropout_keep_prob']: edge_dropout_keep_prob,
-                self.placeholders['iteration_mask']: batch_data['iteration_mask'],
-                self.placeholders['incre_adj_mat']: batch_data['incre_adj_mat'],
-                self.placeholders['distance_to_others']: batch_data['distance_to_others'],
-                self.placeholders['node_sequence']: batch_data['node_sequence'],
-                self.placeholders['edge_type_masks']: batch_data['edge_type_masks'],
-                self.placeholders['edge_type_labels']: batch_data['edge_type_labels'],
-                self.placeholders['edge_masks']: batch_data['edge_masks'],
-                self.placeholders['edge_labels']: batch_data['edge_labels'],
-                self.placeholders['local_stop']: batch_data['local_stop'],
-                self.placeholders['max_iteration_num']: batch_data['max_iteration_num'],
-                self.placeholders['kl_trade_off_lambda']: self.params['kl_trade_off_lambda'],
-            }
+            batch_feed_dict = self._make_feed_dict(batch_data, len(elements), bucket_size, is_training)
             bucket_counters[bucket] += 1
             yield batch_feed_dict
+
+    def _make_feed_dict(self, batch_data, batch_size, bucket_size, is_training):
+        if is_training:
+            dropout_keep_prob = self.params['graph_state_dropout_keep_prob']
+            edge_dropout_keep_prob = self.params['edge_weight_dropout_keep_prob']
+            out_layer_dropout_keep_prob = self.params['out_layer_dropout_keep_prob']
+        else:
+            dropout_keep_prob = 1.
+            edge_dropout_keep_prob = 1.
+            out_layer_dropout_keep_prob = 1.
+
+        initial_representations = batch_data['init']
+        initial_representations = self.pad_annotations(initial_representations)
+        batch_feed_dict = {
+            self.placeholders['initial_node_representation']: initial_representations,
+            self.placeholders['node_symbols']: batch_data['init'],
+            self.placeholders['latent_node_symbols']: initial_representations,
+            self.placeholders['num_graphs']: batch_size,
+            self.placeholders['num_vertices']: bucket_size,
+            self.placeholders['adjacency_matrix']: batch_data['adj_mat'],
+            self.placeholders['node_mask']: batch_data['node_mask'],
+            self.placeholders['graph_state_keep_prob']: dropout_keep_prob,
+            self.placeholders['edge_weight_dropout_keep_prob']: edge_dropout_keep_prob,
+            self.placeholders['iteration_mask']: batch_data['iteration_mask'],
+            self.placeholders['incre_adj_mat']: batch_data['incre_adj_mat'],
+            self.placeholders['distance_to_others']: batch_data['distance_to_others'],
+            self.placeholders['node_sequence']: batch_data['node_sequence'],
+            self.placeholders['edge_type_masks']: batch_data['edge_type_masks'],
+            self.placeholders['edge_type_labels']: batch_data['edge_type_labels'],
+            self.placeholders['edge_masks']: batch_data['edge_masks'],
+            self.placeholders['edge_labels']: batch_data['edge_labels'],
+            self.placeholders['local_stop']: batch_data['local_stop'],
+            self.placeholders['max_iteration_num']: batch_data['max_iteration_num'],
+            self.placeholders['kl_trade_off_lambda']: self.params['kl_trade_off_lambda'],
+            self.placeholders['out_layer_dropout_keep_prob']: out_layer_dropout_keep_prob,
+            self.placeholders['z_prior']: utils.generate_std_normal(
+                batch_size, bucket_size, self.params['hidden_size']),
+        }
+        return batch_feed_dict
 
 if __name__ == "__main__":
     args = docopt(__doc__)

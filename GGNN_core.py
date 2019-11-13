@@ -76,6 +76,8 @@ class ChemModel(object):
         self.annotation_size = 0
         self.train_data = self.load_data(params['train_file'], is_training_data=True)
         self.valid_data = self.load_data(params['valid_file'], is_training_data=False)
+        self.train_data = "train"
+        self.valid_data = "valid"
 
         # Build the actual model
         config = tf.ConfigProto()
@@ -127,8 +129,8 @@ class ChemModel(object):
         self.num_edge_types = max(self.num_edge_types, num_fwd_edge_types * (1 if self.params['tie_fwd_bkwd'] else 2))
         self.annotation_size = max(self.annotation_size, len(data[0]["node_features"][0]))
 
-        data_fn = load_save_disk(self.process_raw_graphs, file_name)
-        return data_fn(data, is_training_data, file_name)
+        # data_fn = load_save_disk(self.process_raw_graphs, file_name)
+        # return data_fn(data, is_training_data, file_name)
 
     @staticmethod
     def graph_string_to_array(graph_string: str) -> List[List[int]]:
@@ -248,10 +250,7 @@ class ChemModel(object):
             processed_graphs += num_graphs
             batch_data[self.placeholders['is_generative']] = False
             # Randomly sample from normal distribution
-            batch_data[self.placeholders['z_prior']] = utils.generate_std_normal(\
-                self.params['batch_size'], batch_data[self.placeholders['num_vertices']],self.params['hidden_size'])
             if is_training:
-                batch_data[self.placeholders['out_layer_dropout_keep_prob']] = self.params['out_layer_dropout_keep_prob']
                 writer = self.writer
                 fetch_list = [self.ops['loss'], self.ops['train_step'],
                               self.ops["edge_loss"], self.ops['kl_loss'],
@@ -260,7 +259,6 @@ class ChemModel(object):
                               self.ops['mean_edge_loss'], self.ops['mean_node_symbol_loss'],
                               self.ops['mean_kl_loss']]
             else:
-                batch_data[self.placeholders['out_layer_dropout_keep_prob']] = 1.0
                 writer = self.writer_valid
                 fetch_list = [self.ops['mean_edge_loss']]
             if step % 500 == 0 and self.summary_op is not None:
