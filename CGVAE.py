@@ -53,6 +53,7 @@ class DenseGGNNChemModel(ChemModel):
         super().__init__(args)
 
         self.make_minibatch_iterator = self._make_minibatch_iterator_from_file
+        self.generate_new_graphs = self._generate_new_graphs_from_file
 
     @classmethod
     def default_params(cls):
@@ -806,16 +807,16 @@ class DenseGGNNChemModel(ChemModel):
         return random_normal_states + self.params['prior_learning_rate'] * derivative_z_sampled
 
     # optimization in latent space. generate one molecule for each optimization step
-    def optimization_over_prior(self, random_normal_states, num_vertices, generated_all_similes, elements, count):
+    def optimization_over_prior(self, random_normal_states, num_vertices, generated_all_similes, elements):
         # record how many optimization steps are taken
         step=0
         # generate a new molecule
-        self.generate_graph_with_state(random_normal_states, num_vertices, generated_all_similes, elements, step, count)
+        self.generate_graph_with_state(random_normal_states, num_vertices, generated_all_similes, elements, step)
         return random_normal_states
 
 
     def generate_graph_with_state(self, random_normal_states, num_vertices,
-                                  generated_all_similes, elements, step, count):
+                                  generated_all_similes, elements, step):
         # Get back node symbol predictions
         # Prepare dict
         node_symbol_batch_feed_dict=self.get_dynamic_feed_dict(elements, None, None,
@@ -879,34 +880,57 @@ class DenseGGNNChemModel(ChemModel):
         elements['adj_mat']=np.zeros((self.num_edge_types, maximum_length, maximum_length))
         return maximum_length
 
-    def generate_new_graphs(self, data):
+    def _generate_new_graphs_from_file(self, data):
+        bucket_sizes = dataset_info(self.params["dataset"])["bucket_sizes"].copy()
+        np.random.shuffle(bucket_sizes)
+        batch_size = self.params["batch_size"]
+
+        generated_all_similes = []
+        for bucket_size in bucket_sizes:
+            fname = "{}/data_{}_{:03d}.pkl".format(data, self.params["dataset"], bucket_size)
+            print("Loading", fname)
+            with open(fname, "rb") as fin:
+                bucketed = pickle.load(fin)
+
+            n_samples = len(bucketed)
+            num_batches = int(np.ceil(n_samples / batch_size))
+
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * batch_size
+                end_idx = min(start_idx + batch_size, n_samples)
+                elements_batch = bucketed[start_idx:end_idx]
+                self._generate_new_graphs_from_batch(elements_batch, generated_all_similes, bucket_size)
+
+    def _generate_new_graphs_from_memory(self, data):
         # bucketed: data organized by bucket
-        (bucketed, bucket_sizes, bucket_at_step) = data  
-        bucket_counters = defaultdict(int)        
+        (bucketed, bucket_sizes, bucket_at_step) = data
+        bucket_counters = defaultdict(int)
         # all generated similes
         generated_all_similes=[]
-        # counter
-        count = 0
+
         # shuffle the lengths
         np.random.shuffle(bucket_at_step)
         for step in range(len(bucket_at_step)):
             bucket = bucket_at_step[step] # bucket number
+            bucket_size = bucket_sizes[bucket]
             # data index
             start_idx = bucket_counters[bucket] * self.params['batch_size']
             end_idx = (bucket_counters[bucket] + 1) * self.params['batch_size']
             # batch data
             elements_batch = bucketed[bucket][start_idx:end_idx]
-            for elements in elements_batch:
-                # compensate for the length during generation 
-                # (this is a result that BFS may not make use of all candidate nodes during generation)
-                maximum_length=self.compensate_node_length(elements, bucket_sizes[bucket])
-                # initial state
-                random_normal_states=generate_std_normal(1, maximum_length,\
-                                                         self.params['hidden_size']) # [1, v, h]                
-                random_normal_states = self.optimization_over_prior(random_normal_states, 
-                                     maximum_length, generated_all_similes,elements, count)
-                count+=1
+            self._generate_new_graphs_from_batch(elements_batch, generated_all_similes, bucket_size)
+
             bucket_counters[bucket] += 1
+
+    def _generate_new_graphs_from_batch(self, elements_batch, generated_all_similes, bucket_size):
+        for elements in elements_batch:
+            # compensate for the length during generation
+            # (this is a result that BFS may not make use of all candidate nodes during generation)
+            maximum_length = self.compensate_node_length(elements, bucket_size)
+            # initial state
+            random_normal_states = generate_std_normal(1, maximum_length, self.params['hidden_size']) # [1, v, h]
+            random_normal_states = self.optimization_over_prior(
+                random_normal_states, maximum_length, generated_all_similes, elements)
 
     def _make_minibatch_iterator_from_file(self, data, is_training: bool):
         bucket_sizes = dataset_info(self.params["dataset"])["bucket_sizes"].copy()
