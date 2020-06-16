@@ -70,7 +70,7 @@ class DenseGGNNChemModel(ChemModel):
                         'batch_size': 8 if dataset=='zinc' or dataset=='cep' else 64,              
                         "qed_trade_off_lambda": 10,
                         'num_epochs': 3 if dataset=='zinc' or dataset=='cep' else 10,
-                        'epoch_to_generate': 9999, #if dataset=='zinc' or dataset=='cep' else 10,
+                        'epoch_to_generate': 3 if dataset=='zinc' or dataset=='cep' else 10,
                         'number_of_generation': 50000,
                         'maximum_distance': 10,
                         "use_argmax_generation": False,    # use random sampling or argmax during generation
